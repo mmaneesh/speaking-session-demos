@@ -8,9 +8,10 @@ test('checkout shows the subtotal, shipping and order total', async ({ page }) =
   await page.getByTestId('checkout-btn').click();
 
   // Then the order summary adds up
-  // Use auto-retrying assertions so we wait for the values to finish loading
-  // (the element initially shows a placeholder like "…").
-  await expect(page.getByTestId('subtotal')).toHaveText('$100.00');
-  await expect(page.getByTestId('shipping')).toHaveText('$4.99');
-  await expect(page.getByTestId('total')).toHaveText('$104.99');
+  const subtotal = await page.getByTestId('subtotal').textContent();
+  const shipping = await page.getByTestId('shipping').textContent();
+  const total = await page.getByTestId('total').textContent();
+  expect(subtotal).toBe('$100.00');
+  expect(shipping).toBe('$4.99');
+  expect(total).toBe('$104.99');
 });

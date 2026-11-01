@@ -2,12 +2,6 @@
 
 All notable changes to the TechGear checkout. Newest first.
 
-## v2.3 (2026-10-28)
-### Changed
-- Flat-rate shipping is now $5.00, up from $4.99 (CHK-334).
-### Fixed
-- Cart heading no longer shows "1 Items" for a single item (CHK-331).
-
 ## v2.2 (2026-10-14)
 ### Added
 - Order confirmation now shows an order number (CHK-318).
