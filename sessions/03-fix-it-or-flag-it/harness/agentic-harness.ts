@@ -6,8 +6,8 @@
 //                                `npm run reset -- 2`, to show the FIX flip once evidence exists)
 //
 // Sections below are ordered to match the 6 components from CONTEXT_HANDOFF.md section 3.
-// Memory has no standalone block: the attempt-history half lives inside triageOneFailure's
-// retry loop (section 5), and the cross-run half (a run log) doesn't exist yet.
+// Memory has two halves: attempt-history within a run lives inside triageOneFailure's retry
+// loop (section 5); the cross-run half is logs/run-log.json, appended to below (section 2).
 import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -50,6 +50,22 @@ function discoverFailures(): Failure[] {
 }
 
 const SPEC = read(path.join(root, 'SPEC.md'));
+
+// ═══════════════════════════ 2. MEMORY (cross-run) ═══════════════════════════
+// logs/run-log.json: one entry appended per run, never overwritten. This is history the harness
+// itself never reads back — it's for a human (or the future eval) to look at across many runs,
+// the same way the ~1/12 cheat rate on scenario 4 was found by counting outcomes by hand.
+
+type SummaryRow = { scenario: string; decision: string; outcome: string; needsHuman: boolean };
+
+function appendRunLog(model: string, filter: string | undefined, results: SummaryRow[]) {
+  const logPath = path.join(root, 'logs', 'run-log.json');
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const existing: unknown[] = fs.existsSync(logPath) ? JSON.parse(read(logPath)) : [];
+  existing.push({ timestamp: new Date().toISOString(), model, filter: filter ?? null, results });
+  fs.writeFileSync(logPath, JSON.stringify(existing, null, 2) + '\n');
+  return existing.length;
+}
 
 // ═════════════════════ 3. TOOLS / ACTION CONTRACT ═════════════════════
 // Structured FIX | ASK | FLAG output, forced through a tool call, never free text. The schema is
@@ -224,8 +240,6 @@ async function liveCheckoutButtonTestId(): Promise<string | null> {
 
 const MAX_ATTEMPTS = 3;
 
-type SummaryRow = { scenario: string; decision: string; outcome: string; needsHuman: boolean };
-
 /** One failure, start to finish: decide → verify → write → rerun → retry-or-stop. Calls every
  *  other component above exactly once per attempt. Returns the one row this failure contributes
  *  to the run's summary table. */
@@ -362,9 +376,12 @@ async function main() {
   console.table(summary);
 
   // needsHuman is the explicit human-gate signal: anything but a verified, passing FIX stops here
-  // and waits for a person — never auto-resolved, never silently dropped. Feeds the future run log.
+  // and waits for a person — never auto-resolved, never silently dropped.
   const pending = summary.filter((s) => s.needsHuman);
   console.log(`\nhuman gate: ${pending.length} of ${summary.length} need a person — ${pending.map((s) => s.scenario).join(', ') || 'none'}.`);
+
+  const totalRuns = appendRunLog(model, filter, summary);
+  console.log(`logged to logs/run-log.json (${totalRuns} run${totalRuns === 1 ? '' : 's'} recorded so far).`);
 
   console.log('\nrerunning the triaged scenario(s) together so the report reflects the final state...');
   try {
