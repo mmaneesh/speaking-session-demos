@@ -48,10 +48,26 @@ test.describe('Scenario behaviour', () => {
     await expect(page).toHaveURL(/\/checkout\?scenario=2$/);
     await expect(checkoutPage.shipping).toHaveText('$5.00');
   });
+
+  // Scenario 5 behaves differently from 1-4: it's not a wrong value, it's a legitimate delay.
+  // A polling assertion settles to the exact baseline; an immediate read catches the placeholder.
+  test('scenario 5 settles to the baseline values, just later', async ({ cartPage, checkoutPage }) => {
+    await cartPage.goto('?scenario=5');
+    await cartPage.proceedToCheckout();
+    await expect(checkoutPage.subtotal).toHaveText('$100.00');
+    await expect(checkoutPage.shipping).toHaveText('$4.99');
+    await expect(checkoutPage.total).toHaveText('$104.99');
+  });
+
+  test('scenario 5 shows a placeholder before the totals hydrate', async ({ cartPage, checkoutPage }) => {
+    await cartPage.goto('?scenario=5');
+    await cartPage.proceedToCheckout();
+    expect(await checkoutPage.total.textContent()).toBe('…');
+  });
 });
 
 test.describe('Scenario files', () => {
-  const dirs = ['01', '02', '03', '04'];
+  const dirs = ['01', '02', '03', '04', '05'];
   const baseline = (dir: string) => fs.readFileSync(path.join('scenarios', dir, 'test.spec.ts.baseline'), 'utf-8');
 
   test('scenario 2 and 3 tests differ only in the scenario number', () => {

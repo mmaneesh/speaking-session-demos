@@ -6,12 +6,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const FOLDERS = ['01', '02', '03', '04'];
+const FOLDERS = ['01', '02', '03', '04', '05'];
 
 const arg = process.argv[2];
 const picked = arg === undefined || arg === 'all' ? null : Number(arg);
-if (picked !== null && !(Number.isInteger(picked) && picked >= 1 && picked <= 4)) {
-  console.error('Usage: npm run reset -- [1|2|3|4|all]');
+if (picked !== null && !(Number.isInteger(picked) && picked >= 1 && picked <= FOLDERS.length)) {
+  console.error(`Usage: npm run reset -- [1-${FOLDERS.length}|all]`);
   process.exit(1);
 }
 
