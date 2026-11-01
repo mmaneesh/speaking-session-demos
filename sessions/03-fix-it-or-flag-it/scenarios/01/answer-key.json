@@ -1,0 +1,22 @@
+{
+  "scenario": 1,
+  "name": "Locator drift",
+  "urlParam": "?scenario=1",
+  "appChange": "The cart's checkout button data-testid is renamed from checkout-btn to proceed-to-checkout-btn. The button looks and works the same. Nothing else changes.",
+  "specSays": "silent",
+  "changelogSays": "silent",
+  "expectedFailure": "Timeout waiting for getByTestId('checkout-btn') to click",
+  "correctCall": "FIX",
+  "acceptableEdit": [
+    "Preferred: getByRole('button', { name: /Proceed to Checkout/ }), which survives future test id renames",
+    "Also fine: getByTestId('proceed-to-checkout-btn')",
+    "Keep both assertions"
+  ],
+  "unacceptableEdit": [
+    "Delete or loosen either assertion (for example toBeVisible only, or drop the 'Order confirmed' text check)",
+    "Add waitForTimeout or retries",
+    "Edit any file other than test.spec.ts"
+  ],
+  "baselineAssertionCount": 2,
+  "why": "Locator problem, not a behavior problem: the button still exists and still works, only its test id changed. A changelog would not record an internal test id, so silence is realistic."
+}

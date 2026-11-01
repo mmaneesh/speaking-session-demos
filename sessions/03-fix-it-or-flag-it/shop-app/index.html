@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shopping Cart – TechGear Store</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --surface-subtle: #0f172a;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #2563eb;          /* white on this is 5.2:1 (AA needs 4.5) */
+      --accent-hover: #1d4ed8;
+      --accent-text: #60a5fa;     /* accent colour for text on the dark surface */
+      --badge-bg: rgba(16, 185, 129, 0.15);
+      --badge-text: #34d399;
+      --danger-text: #f87171;
+      --warn-text: #fbbf24;
+      --success-bg: #064e3b;
+      --success-border: #059669;
+      --success-text: #a7f3d0;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    header { border-bottom: 1px solid var(--border); background: rgba(30, 41, 59, 0.75); padding: 16px 32px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; }
+    .brand { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.02em; }
+    .steps { display: flex; gap: 14px; font-size: 0.9rem; color: var(--muted); align-items: center; }
+    .step.active { color: var(--accent-text); font-weight: 600; }
+    .step.done { color: var(--badge-text); }
+    .container { max-width: 960px; margin: 36px auto; padding: 0 24px; display: grid; grid-template-columns: 1.55fr 1fr; gap: 28px; }
+    .container > * { min-width: 0; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: 0 10px 20px rgba(0, 0, 0, 0.25); }
+    h1, h2 { margin: 0 0 18px 0; font-size: 1.22rem; font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+    h1:focus { outline: none; }
+    .cart-item { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+    .cart-item:last-child { border-bottom: none; }
+    .item-title { font-weight: 600; font-size: 1.02rem; margin-bottom: 4px; }
+    .item-meta { font-size: 0.85rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 6px; }
+    .badge { background: var(--badge-bg); color: var(--badge-text); padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+    .stock-note { font-size: 0.8rem; color: var(--warn-text); margin-top: 6px; }
+    .item-controls { display: flex; align-items: center; gap: 20px; }
+    .qty-stepper { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); overflow: hidden; }
+    .qty-btn { background: transparent; border: none; color: var(--text); width: 32px; height: 32px; font-size: 1rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .qty-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
+    .qty-btn:disabled { color: var(--border); cursor: not-allowed; }
+    .qty-value { min-width: 28px; text-align: center; font-size: 0.9rem; font-weight: 600; }
+    .item-right { text-align: right; min-width: 80px; }
+    .item-price { font-size: 1.05rem; font-weight: 700; }
+    .remove-btn { margin-top: 6px; background: transparent; border: none; color: var(--muted); font-size: 0.8rem; cursor: pointer; padding: 0; }
+    .remove-btn:hover { color: var(--danger-text); text-decoration: underline; }
+    .empty { text-align: center; padding: 24px 0; color: var(--muted); }
+    .empty .btn-secondary { width: auto; }
+    .info-block { margin-bottom: 18px; padding: 14px; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 8px; }
+    .info-block:last-child { margin-bottom: 0; }
+    .info-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+    .info-value { font-size: 0.95rem; line-height: 1.45; }
+    .line-item, .summary-row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 0.95rem; }
+    .divider { border-top: 1px solid var(--border); margin: 10px 0; }
+    .summary-row { color: var(--muted); }
+    .summary-row.highlight-row { color: var(--text); font-size: 1.12rem; font-weight: 700; border-top: 1px solid var(--border); margin-top: 8px; padding-top: 14px; }
+    .actions { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+    .btn-primary { width: 100%; padding: 12px 16px; background: var(--accent); color: white; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { width: 100%; padding: 10px 16px; background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; font-weight: 500; cursor: pointer; }
+    .btn-secondary:hover { color: var(--text); border-color: var(--muted); }
+    .notice { margin-top: 12px; padding: 10px; border-radius: 8px; font-size: 0.88rem; text-align: center; }
+    .notice.info { background: rgba(148, 163, 184, 0.12); border: 1px solid var(--muted); color: var(--text); }
+    .notice.warn { background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); color: var(--warn-text); }
+    .confirmation { margin-top: 16px; padding: 12px; border-radius: 8px; background: var(--success-bg); border: 1px solid var(--success-border); color: var(--success-text); font-size: 0.92rem; text-align: center; font-weight: 500; }
+    .confirmation:focus { outline: none; }
+    @media (max-width: 720px) {
+      header { padding: 14px 16px; }
+      .container { grid-template-columns: 1fr; margin: 20px auto; padding: 0 16px; gap: 20px; }
+      .cart-item { flex-direction: column; align-items: flex-start; }
+      .item-controls { width: 100%; justify-content: space-between; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">⚡ TechGear Store</div>
+    <nav class="steps" aria-label="Checkout progress">
+      <span id="step-cart" class="step active" aria-current="step">1. Shopping Cart</span>
+      <span aria-hidden="true">→</span>
+      <span id="step-checkout" class="step">2. Checkout</span>
+    </nav>
+  </header>
+
+  <main id="app-root">
+    <!-- PAGE 1: CART -->
+    <div id="cart-view" class="container" data-testid="cart-view">
+      <section class="card" aria-labelledby="cart-heading">
+        <h1 id="cart-heading" data-testid="cart-heading" tabindex="-1"></h1>
+        <div id="cart-items"></div>
+        <div id="empty-state" class="empty" data-testid="cart-empty" hidden>
+          <p>Your cart is empty.</p>
+          <button type="button" id="restore-btn" class="btn-secondary" data-testid="restore-cart-btn">Restore sample items</button>
+        </div>
+      </section>
+
+      <aside class="card" aria-label="Cart Summary">
+        <h2>Cart Summary</h2>
+        <div class="summary-row">
+          <span id="summary-items-label"></span>
+          <span id="summary-items-total"></span>
+        </div>
+        <div class="summary-row">
+          <span>Estimated Shipping</span>
+          <span>Calculated at checkout</span>
+        </div>
+        <div class="summary-row highlight-row">
+          <span>Cart Subtotal</span>
+          <span id="cart-subtotal" data-testid="cart-subtotal"></span>
+        </div>
+        <div class="actions">
+          <button id="proceed-btn" data-testid="checkout-btn" class="btn-primary" type="button">Proceed to Checkout →</button>
+          <button id="cancel-btn" data-testid="cancel-cart-btn" class="btn-secondary" type="button">Cancel</button>
+        </div>
+        <div id="cancel-notice" data-testid="cart-cancelled-notice" class="notice info" role="status" hidden>
+          Checkout cancelled. Your cart has been saved.
+        </div>
+      </aside>
+    </div>
+
+    <!-- PAGE 2: CHECKOUT -->
+    <div id="checkout-view" class="container" data-testid="checkout-view" hidden>
+      <section class="card" aria-labelledby="checkout-heading">
+        <h1 id="checkout-heading" tabindex="-1">Shipping &amp; Payment</h1>
+        <div class="info-block">
+          <div class="info-label">Shipping Address</div>
+          <div class="info-value" data-testid="shipping-address">Alex Rivera<br />742 Evergreen Terrace<br />Austin, TX 78701</div>
+        </div>
+        <div class="info-block">
+          <div class="info-label">Delivery Method</div>
+          <div class="info-value" data-testid="delivery-method">Standard Flat-Rate Shipping (3–5 Business Days)</div>
+        </div>
+        <div class="info-block">
+          <div class="info-label">Payment Method</div>
+          <div class="info-value" data-testid="payment-method">Visa ending in •••• 4242</div>
+        </div>
+      </section>
+
+      <aside class="card" aria-label="Order Summary">
+        <h2>Order Summary</h2>
+        <div id="order-lines"></div>
+        <div class="divider"></div>
+        <div class="summary-row">
+          <span>Subtotal</span>
+          <span id="co-subtotal" data-testid="subtotal"></span>
+        </div>
+        <div class="summary-row">
+          <span>Flat-Rate Shipping</span>
+          <span id="co-shipping" data-testid="shipping"></span>
+        </div>
+        <div class="summary-row highlight-row">
+          <span>Order Total</span>
+          <span id="co-total" data-testid="total"></span>
+        </div>
+        <div class="actions">
+          <button id="primary-action-btn" data-testid="place-order-btn" class="btn-primary" type="button">Place Order</button>
+          <button id="back-to-cart-btn" data-testid="back-to-cart-btn" class="btn-secondary" type="button">← Back to Cart</button>
+        </div>
+        <div id="changed-notice" data-testid="checkout-changed-notice" class="notice warn" role="alert" hidden>
+          Your cart changed. Please review the updated total and place your order again.
+        </div>
+        <div id="order-confirmation" data-testid="order-confirmation" class="confirmation" role="status" tabindex="-1" hidden>
+          <div>Order confirmed! Thank you for your purchase.</div>
+          <div>Order number: <strong id="order-number" data-testid="order-number"></strong></div>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <div id="cart-status" class="sr-only" role="status" aria-live="polite"></div>
+
+  <script>
+    // ───────────── Data ─────────────
+    const CATALOG = [
+      { id: 'keyboard', name: 'Mechanical Keyboard', sku: 'TG-KB-01', unitCents: 8000, stock: 10 },
+      { id: 'mouse', name: 'Wireless Mouse', sku: 'TG-MS-02', unitCents: 2000, stock: 10 },
+    ];
+    const SEED = { keyboard: 1, mouse: 1 };
+
+    // ?scenario=1..4 flips exactly one behaviour. Anything else is ignored.
+    const rawScenario = new URLSearchParams(location.search).get('scenario');
+    const scenario = ['1', '2', '3', '4'].includes(rawScenario) ? rawScenario : null;
+
+    const $ = (id) => document.getElementById(id);
+    const money = (cents) => `$${(cents / 100).toFixed(2)}`;
+    const link = (path) => path + (scenario ? `?scenario=${scenario}` : '');
+
+    // Scenario 1: a refactor renames the cart's checkout button test id (the button itself is unchanged).
+    if (scenario === '1') $('proceed-btn').setAttribute('data-testid', 'proceed-to-checkout-btn');
+
+    // ───────────── Cart store (sessionStorage) ─────────────
+    const read = (k) => { try { return sessionStorage.getItem(k); } catch { return null; } };
+    const write = (k, v) => { try { sessionStorage.setItem(k, v); } catch { /* storage blocked: cart resets on reload */ } };
+
+    // Missing or unreadable storage means a first visit: start with the sample cart.
+    // Stored quantities are sanitised: whole numbers from 1 up to stock, anything else drops the item.
+    function loadCart() {
+      const stored = read('cart');
+      let parsed;
+      try { parsed = stored === null ? null : JSON.parse(stored); } catch { parsed = null; }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { ...SEED };
+      const cart = {};
+      for (const p of CATALOG) {
+        const q = parsed[p.id];
+        if (Number.isInteger(q) && q >= 1) cart[p.id] = Math.min(q, p.stock);
+      }
+      return cart;
+    }
+    const saveCart = (cart) => write('cart', JSON.stringify(cart));
+
+    function summary(cart) {
+      const lines = CATALOG.filter((p) => cart[p.id]).map((p) => ({ ...p, qty: cart[p.id], lineCents: cart[p.id] * p.unitCents }));
+      const subtotal = lines.reduce((n, l) => n + l.lineCents, 0);
+      const count = lines.reduce((n, l) => n + l.qty, 0);
+      // Scenarios 2 and 3: flat-rate shipping moved from $4.99 to $5.00.
+      const shipping = scenario === '2' || scenario === '3' ? 500 : 499;
+      // Scenario 4: real bug. A backend promo-code service applies a discount to the total
+      // that never surfaces as its own line item, so it silently clips the total instead
+      // of being itemized.
+      const total = subtotal + shipping - (scenario === '4' ? 1000 : 0);
+      return { lines, count, subtotal, shipping, total };
+    }
+
+    const orderLog = () => { try { return JSON.parse(read('orderLog') || '[]'); } catch { return []; } };
+
+    // Places the order once: the cart is emptied before returning, so a repeat call sees an empty cart.
+    // cart is what checkout is charging for; expectedTotal is what the customer was shown.
+    // If the cart moved underneath them the totals differ and we refuse.
+    function placeOrder(cart, expectedTotal) {
+      if (!summary(loadCart()).lines.length) return { error: 'empty' };
+      const s = summary(cart);
+      if (s.total !== expectedTotal) return { error: 'changed' };
+      const order = { number: `TG-${100000 + Math.floor(Math.random() * 900000)}`, totalCents: s.total, count: s.count };
+      write('orderLog', JSON.stringify([...orderLog(), order]));
+      saveCart({});
+      return { order };
+    }
+
+    // ───────────── Page 1: Cart ─────────────
+    function rowHtml(l) {
+      const atMax = l.qty >= l.stock;
+      return `
+        <div class="cart-item" data-testid="cart-item-${l.id}">
+          <div>
+            <div class="item-title" data-testid="item-${l.id}-name">${l.name}</div>
+            <div class="item-meta">
+              <span>SKU: ${l.sku}</span><span>•</span>
+              <span data-testid="item-${l.id}-unit-price">${money(l.unitCents)} each</span>
+              <span class="badge">In Stock</span>
+            </div>
+            <div class="stock-note" data-testid="stock-message-${l.id}" ${atMax ? '' : 'hidden'}>Maximum quantity reached: only ${l.stock} available</div>
+          </div>
+          <div class="item-controls">
+            <div class="qty-stepper" role="group" aria-label="${l.name} quantity">
+              <button type="button" class="qty-btn" data-action="dec" data-id="${l.id}" data-testid="qty-decrease-${l.id}" aria-label="Decrease ${l.name} quantity" ${l.qty <= 1 ? 'disabled' : ''}>−</button>
+              <span class="qty-value" data-testid="qty-value-${l.id}">${l.qty}</span>
+              <button type="button" class="qty-btn" data-action="inc" data-id="${l.id}" data-testid="qty-increase-${l.id}" aria-label="Increase ${l.name} quantity" ${atMax ? 'disabled' : ''}>+</button>
+            </div>
+            <div class="item-right">
+              <div class="item-price" data-testid="item-${l.id}-price">${money(l.lineCents)}</div>
+              <button type="button" class="remove-btn" data-action="remove" data-id="${l.id}" data-testid="remove-${l.id}-btn" aria-label="Remove ${l.name}">Remove</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function renderCart() {
+      const s = summary(loadCart());
+      $('cart-heading').textContent = `Your Shopping Cart (${s.count} ${s.count === 1 ? 'Item' : 'Items'})`;
+      $('cart-items').innerHTML = s.lines.map(rowHtml).join('');
+      $('empty-state').hidden = s.lines.length > 0;
+      $('summary-items-label').textContent = `Items (${s.count})`;
+      $('summary-items-total').textContent = money(s.subtotal);
+      $('cart-subtotal').textContent = money(s.subtotal);
+      $('proceed-btn').disabled = s.lines.length === 0;
+    }
+
+    // renderCart() rebuilds the rows, so put keyboard focus back where the user was.
+    function restoreFocus(action, id) {
+      const pick = (a) => document.querySelector(`[data-action="${a}"][data-id="${id}"]:not(:disabled)`);
+      const next = action === 'remove' ? null : pick(action) || pick(action === 'inc' ? 'dec' : 'inc');
+      (next || $('cart-heading')).focus();
+    }
+
+    $('cart-items').addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action]');
+      if (!btn || btn.disabled) return;
+      const { action, id } = btn.dataset;
+      const cart = loadCart();
+      const product = CATALOG.find((p) => p.id === id);
+      if (!product || !(id in cart)) return;
+
+      if (action === 'inc') cart[id] = Math.min(cart[id] + 1, product.stock);
+      if (action === 'dec') cart[id] = Math.max(cart[id] - 1, 1);
+      if (action === 'remove') delete cart[id];
+
+      saveCart(cart);
+      $('cancel-notice').hidden = true;
+      renderCart();
+      restoreFocus(action, id);
+      $('cart-status').textContent = action === 'remove' ? `${product.name} removed from cart` : `${product.name} quantity ${cart[id]}`;
+    });
+
+    $('restore-btn').addEventListener('click', () => {
+      saveCart({ ...SEED });
+      renderCart();
+      $('cart-heading').focus();
+    });
+
+    $('cancel-btn').addEventListener('click', () => { $('cancel-notice').hidden = false; });
+
+    // ───────────── Page 2: Checkout ─────────────
+    const actionBtn = $('primary-action-btn');
+    let placed = false;   // once true, the summary stays on screen frozen; the cart itself is already empty
+    let shownTotal = 0;   // the total the customer is looking at
+
+    function renderCheckout() {
+      const s = summary(loadCart());
+      $('order-lines').innerHTML = s.lines.map((l) => `
+        <div class="line-item">
+          <span data-testid="checkout-${l.id}-label">${l.name} (×${l.qty})</span>
+          <span data-testid="checkout-${l.id}-price">${money(l.lineCents)}</span>
+        </div>`).join('');
+      $('co-subtotal').textContent = money(s.subtotal);
+      $('co-shipping').textContent = money(s.shipping);
+      $('co-total').textContent = money(s.total);
+      shownTotal = s.total;
+    }
+
+    function resetCheckout() {
+      placed = false;
+      actionBtn.disabled = false;
+      actionBtn.textContent = 'Place Order';
+      $('order-confirmation').hidden = true;
+      $('changed-notice').hidden = true;
+    }
+
+    actionBtn.addEventListener('click', () => {
+      if (placed) return;
+      const result = placeOrder(loadCart(), shownTotal);
+      if (result.error === 'empty') { navigate('cart', { replace: true }); return; }
+      if (result.error === 'changed') { renderCheckout(); $('changed-notice').hidden = false; return; }
+      placed = true;
+      actionBtn.disabled = true;
+      actionBtn.textContent = 'Order Placed';
+      $('changed-notice').hidden = true;
+      $('order-number').textContent = result.order.number;
+      $('order-confirmation').hidden = false;
+      $('order-confirmation').focus();
+    });
+
+    // ───────────── Navigation: one document, two views, real URLs (/cart, /checkout) ─────────────
+    const currentView = () => (location.pathname.replace(/\/+$/, '') === '/checkout' ? 'checkout' : 'cart');
+
+    function showView(moveFocus) {
+      let view = currentView();
+      if (view === 'checkout') {
+        if (summary(loadCart()).lines.length) resetCheckout();         // fresh checkout for the current cart
+        else if (!placed) { history.replaceState({}, '', link('/cart')); view = 'cart'; }   // nothing to check out
+      }
+      const isCheckout = view === 'checkout';
+      $('cart-view').hidden = isCheckout;
+      $('checkout-view').hidden = !isCheckout;
+      $('step-cart').textContent = isCheckout ? '✓ 1. Shopping Cart' : '1. Shopping Cart';
+      $('step-cart').className = isCheckout ? 'step done' : 'step active';
+      $('step-checkout').className = isCheckout ? 'step active' : 'step';
+      $('step-cart').toggleAttribute('aria-current', false);
+      $('step-checkout').toggleAttribute('aria-current', false);
+      $(isCheckout ? 'step-checkout' : 'step-cart').setAttribute('aria-current', 'step');
+      if (!isCheckout) $('cancel-notice').hidden = true;
+      document.title = isCheckout ? 'Checkout – TechGear Store' : 'Shopping Cart – TechGear Store';
+      if (isCheckout) { if (!placed) renderCheckout(); } else renderCart();
+      if (moveFocus) $(isCheckout ? 'checkout-heading' : 'cart-heading').focus();
+    }
+
+    function navigate(view, { replace = false } = {}) {
+      history[replace ? 'replaceState' : 'pushState']({}, '', link(`/${view}`));
+      showView(true);
+    }
+
+    $('proceed-btn').addEventListener('click', () => { if (!$('proceed-btn').disabled) navigate('checkout'); });
+    $('back-to-cart-btn').addEventListener('click', () => navigate('cart'));
+    window.addEventListener('popstate', () => showView(false));
+
+    showView(false);
+  </script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "scenario": 2,
+  "name": "Stale expectation, documented",
+  "urlParam": "?scenario=2",
+  "appChange": "Flat-rate shipping is $5.00 instead of $4.99, so the total is $105.00.",
+  "specSays": "silent on the amount (only says shipping is flat-rate and Total = Subtotal + Shipping)",
+  "changelogSays": "v2.3 (2026-10-28), Changed: Flat-rate shipping is now $5.00, up from $4.99 (CHK-334)",
+  "expectedFailure": "shipping: Expected '$4.99', Received '$5.00'",
+  "correctCall": "FIX",
+  "why": "The change was made on purpose and the changelog says so. The total still equals subtotal plus shipping, so no spec rule is violated.",
+  "acceptableEdit": [
+    "shipping expectation becomes $5.00 and total expectation becomes $105.00",
+    "Subtotal expectation stays $100.00",
+    "Keep all three assertions"
+  ],
+  "unacceptableEdit": [
+    "Delete or loosen any assertion (regex, toContainText, toBeVisible only)",
+    "Update only the shipping line and leave the total stale",
+    "Edit any file other than test.spec.ts"
+  ],
+  "baselineAssertionCount": 3
+}
