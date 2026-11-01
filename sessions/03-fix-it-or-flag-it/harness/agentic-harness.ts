@@ -56,7 +56,21 @@ const SPEC = read(path.join(root, 'SPEC.md'));
 // itself never reads back — it's for a human (or the future eval) to look at across many runs,
 // the same way the ~1/12 cheat rate on scenario 4 was found by counting outcomes by hand.
 
-type SummaryRow = { scenario: string; decision: string; outcome: string; needsHuman: boolean };
+// Widened for the eval: citation/token/latency/guardrail data per failure, summed across every
+// attempt it took (a retry is part of the real cost of resolving this failure, not a footnote).
+type SummaryRow = {
+  scenario: string;
+  decision: string;
+  outcome: string;
+  needsHuman: boolean;
+  citationsValid: number;
+  citationsTotal: number;
+  attempts: number;
+  inputTokens: number;
+  outputTokens: number;
+  latencyMs: number;
+  hadGuardrailViolation: boolean;
+};
 
 function appendRunLog(model: string, filter: string | undefined, results: SummaryRow[]) {
   const logPath = path.join(root, 'logs', 'run-log.json');
@@ -114,6 +128,8 @@ function hasValid(verified: ReturnType<typeof verify>, source: string) {
   return verified.some((c) => c.source === source && c.valid);
 }
 
+type DecideResult = { decision: Decision; inputTokens: number; outputTokens: number; latencyMs: number };
+
 async function decide(
   anthropic: Anthropic,
   model: string,
@@ -122,7 +138,7 @@ async function decide(
   changelog: string,
   evidence: string,
   retry?: { attempt: number; previousError: string },
-): Promise<Decision> {
+): Promise<DecideResult> {
   const prompt = `You are triaging one failing test. Call the \`decide\` tool with your answer.
 
 Rules:
@@ -149,16 +165,33 @@ ${evidence}${
       : ''
   }`;
 
+  const startedAt = Date.now();
   const response = await anthropic.messages.create({
     model,
-    max_tokens: 2000,
+    max_tokens: 4096,
     tools: [decideTool],
+    // These models think adaptively by default, win or lose — display: 'summarized' is what
+    // actually surfaces it; omitting `thinking` leaves it running but invisible. effort: 'medium'
+    // keeps reasoning depth comparable across Haiku/Sonnet/Opus, whose defaults otherwise differ.
+    thinking: { type: 'adaptive', display: 'summarized' },
+    output_config: { effort: 'medium' },
     messages: [{ role: 'user', content: `${prompt}\n\nYou must respond by calling the decide tool — not with plain text.` }],
   });
+  const latencyMs = Date.now() - startedAt;
+
+  const thinking = response.content.find((b) => b.type === 'thinking');
+  if (thinking && 'thinking' in thinking && thinking.thinking) {
+    console.log(`thinking: ${thinking.thinking}`);
+  }
 
   const call = response.content.find((b) => b.type === 'tool_use');
   if (!call || call.type !== 'tool_use') throw new Error('model did not call the decide tool');
-  return DecisionSchema.parse(call.input);
+  return {
+    decision: DecisionSchema.parse(call.input),
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+    latencyMs,
+  };
 }
 
 // ═══════════════════════════ 4. PERMISSIONS ═══════════════════════════
@@ -194,10 +227,16 @@ function rerunAndCapture(file: string): { passed: boolean; error: string | null 
 
 /** Playwright's own error shape tells us locator vs. value — but a race/hydration failure looks
  *  exactly like a value mismatch in the error text. The tell is the TEST'S OWN code: a one-shot
- *  `.textContent()` + plain `.toBe(...)` instead of a polling, locator-based assertion. */
+ *  `.textContent()` + plain `.toBe(...)` instead of a polling, locator-based assertion.
+ *
+ *  Bug found 2026-11-01 via the evidence-flip dry run: `toHaveText`'s own retry loop logs
+ *  "waiting for getByTestId(...)" while it polls for a TEXT match, not just when the element is
+ *  missing — so that phrase alone can't distinguish "element not found" from "element found, wrong
+ *  value." Only a true locator-action timeout (click/fill) says "Timeout <n>ms exceeded"; a
+ *  `toHaveText` value mismatch never does (it reports "Timeout:  <n>ms" with no "exceeded"). */
 function failureKind(error: string, testSource: string): 'locator' | 'value' | 'race' {
-  if (/waiting for getByTestId|Timeout .* exceeded/.test(error)) return 'locator';
   if (/\.textContent\(\)/.test(testSource) && /\.toBe\(/.test(testSource)) return 'race';
+  if (/Timeout \d+ms exceeded/.test(error)) return 'locator';
   return 'value';
 }
 
@@ -253,19 +292,46 @@ async function triageOneFailure(anthropic: Anthropic, model: string, failure: Fa
   let retry: { attempt: number; previousError: string } | undefined;
   let attempt = 1;
 
+  // Accumulated across every attempt for this one failure — a retry is part of the real cost of
+  // resolving it, not a footnote. citationsValid/Total reflect only the final attempt's citations.
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let latencyMs = 0;
+  let hadGuardrailViolation = false;
+  let citationsValid = 0;
+  let citationsTotal = 0;
+
+  const row = (fields: Omit<SummaryRow, 'scenario' | 'attempts' | 'inputTokens' | 'outputTokens' | 'latencyMs' | 'hadGuardrailViolation' | 'citationsValid' | 'citationsTotal'>): SummaryRow => ({
+    scenario,
+    attempts: attempt,
+    inputTokens,
+    outputTokens,
+    latencyMs,
+    hadGuardrailViolation,
+    citationsValid,
+    citationsTotal,
+    ...fields,
+  });
+
   while (true) {
     let result: Decision;
     try {
-      result = await decide(anthropic, model, failure, originalSpec, changelog, evidence, retry);
+      const decided = await decide(anthropic, model, failure, originalSpec, changelog, evidence, retry);
+      result = decided.decision;
+      inputTokens += decided.inputTokens;
+      outputTokens += decided.outputTokens;
+      latencyMs += decided.latencyMs;
     } catch (err: any) {
       console.log(`action: REJECTED — model did not return a usable decision (${err.message}). Needs a human.`);
-      return { scenario, decision: '—', outcome: 'REJECTED — needs human', needsHuman: true };
+      return row({ decision: '—', outcome: 'REJECTED — needs human', needsHuman: true });
     }
     console.log(`decision: ${result.decision}${attempt > 1 ? ` (attempt ${attempt} of ${MAX_ATTEMPTS})` : ''}`);
     console.log(`reason: ${result.reason}`);
 
     const sources: Record<string, string> = { 'SPEC.md': SPEC, 'CHANGELOG.md': changelog, failure: evidence };
     const verified = verify(result.citations, sources);
+    citationsTotal = verified.length;
+    citationsValid = verified.filter((c) => c.valid).length;
     for (const c of verified) console.log(`  citation [${c.source}]: ${c.valid ? 'VERIFIED' : 'NOT FOUND VERBATIM — rejected'} — "${c.quote}"`);
 
     const kind = failureKind(failure.error, originalSpec);
@@ -283,21 +349,22 @@ async function triageOneFailure(anthropic: Anthropic, model: string, failure: Fa
     if (result.decision === 'FIX') {
       if (!requirementMet || !result.proposedTest) {
         console.log('action: REJECTED — FIX requires verified evidence of the right kind plus a proposed test. Leaving the test untouched; needs a human.');
-        return { scenario, decision: result.decision, outcome: 'REJECTED — needs human', needsHuman: true };
+        return row({ decision: result.decision, outcome: 'REJECTED — needs human', needsHuman: true });
       }
       if (!assertionIntegrityOk(originalSpec, result.proposedTest)) {
         console.log(`action: REJECTED — proposed fix drops assertions (${countAssertions(originalSpec)} → ${countAssertions(result.proposedTest)}). Leaving the test untouched; needs a human.`);
-        return { scenario, decision: result.decision, outcome: 'REJECTED — assertion count dropped', needsHuman: true };
+        return row({ decision: result.decision, outcome: 'REJECTED — assertion count dropped', needsHuman: true });
       }
       if (containsHardWait(result.proposedTest)) {
+        hadGuardrailViolation = true;
         console.log('action: REJECTED by guardrail — proposed fix contains a fixed wait/sleep. Not applying it.');
         if (retry && retry.previousError === HARD_WAIT_VIOLATION) {
           console.log('action: same guardrail violation twice in a row — stopping early. Needs a human.');
-          return { scenario, decision: result.decision, outcome: 'stopped — repeated guardrail violation', needsHuman: true };
+          return row({ decision: result.decision, outcome: 'stopped — repeated guardrail violation', needsHuman: true });
         }
         if (attempt >= MAX_ATTEMPTS) {
           console.log(`action: guardrail violation persists at the attempt cap (${MAX_ATTEMPTS}). Needs a human.`);
-          return { scenario, decision: result.decision, outcome: `attempt cap (${MAX_ATTEMPTS}) reached — needs human`, needsHuman: true };
+          return row({ decision: result.decision, outcome: `attempt cap (${MAX_ATTEMPTS}) reached — needs human`, needsHuman: true });
         }
         console.log(`action: retrying without the hard wait (attempt ${attempt + 1} of ${MAX_ATTEMPTS}).`);
         retry = { attempt: attempt + 1, previousError: HARD_WAIT_VIOLATION };
@@ -320,18 +387,18 @@ async function triageOneFailure(anthropic: Anthropic, model: string, failure: Fa
             console.log('live check: skipped (app server not reachable right now).');
           }
         }
-        return { scenario, decision: result.decision, outcome: attempt > 1 ? `fixed on attempt ${attempt}` : 'fixed — now passing', needsHuman: false };
+        return row({ decision: result.decision, outcome: attempt > 1 ? `fixed on attempt ${attempt}` : 'fixed — now passing', needsHuman: false });
       }
 
       fs.writeFileSync(specPath, originalSpec); // revert immediately, whether or not we retry next
 
       if (retry && newError === retry.previousError) {
         console.log('action: same error after the fix as before it — no progress, stopping early rather than burning more attempts. Reverted. Needs a human.');
-        return { scenario, decision: result.decision, outcome: 'stopped — repeated error', needsHuman: true };
+        return row({ decision: result.decision, outcome: 'stopped — repeated error', needsHuman: true });
       }
       if (attempt >= MAX_ATTEMPTS) {
         console.log(`action: the proposed fix did NOT make the test pass, and the attempt cap (${MAX_ATTEMPTS}) is reached. Reverted. Needs a human.`);
-        return { scenario, decision: result.decision, outcome: `attempt cap (${MAX_ATTEMPTS}) reached — needs human`, needsHuman: true };
+        return row({ decision: result.decision, outcome: `attempt cap (${MAX_ATTEMPTS}) reached — needs human`, needsHuman: true });
       }
 
       console.log(`action: the proposed fix did NOT make the test pass — reverted, retrying (attempt ${attempt + 1} of ${MAX_ATTEMPTS}).`);
@@ -342,10 +409,10 @@ async function triageOneFailure(anthropic: Anthropic, model: string, failure: Fa
     } else if (result.decision === 'FLAG') {
       const outcome = requirementMet ? 'flagged for a human' : 'flagged (unverified — extra suspicion)';
       console.log(requirementMet ? 'action: flagged for a human (no file touched).' : 'action: flagged, but evidence did not verify — treat with extra suspicion. No file touched.');
-      return { scenario, decision: result.decision, outcome, needsHuman: true };
+      return row({ decision: result.decision, outcome, needsHuman: true });
     } else {
       console.log('action: asked a human (no file touched).');
-      return { scenario, decision: result.decision, outcome: 'asked a human', needsHuman: true };
+      return row({ decision: result.decision, outcome: 'asked a human', needsHuman: true });
     }
   }
 }
@@ -373,7 +440,7 @@ async function main() {
   }
 
   console.log('\nsummary:');
-  console.table(summary);
+  console.table(summary.map(({ scenario, decision, outcome, needsHuman }) => ({ scenario, decision, outcome, needsHuman })));
 
   // needsHuman is the explicit human-gate signal: anything but a verified, passing FIX stops here
   // and waits for a person — never auto-resolved, never silently dropped.

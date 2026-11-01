@@ -1,0 +1,10 @@
+{
+  "models": ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"],
+  "trials": 5,
+  "scenarios": ["01", "02", "03", "04", "05"],
+  "pricing": {
+    "claude-haiku-5-5": { "in": 0.1, "out": 0.5 },
+    "claude-sonnet-5-5": { "in": 2, "out": 10 },
+    "claude-opus-5-5": { "in": 4, "out": 20 }
+  }
+}

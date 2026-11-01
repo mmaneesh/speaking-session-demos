@@ -12,13 +12,14 @@
     "basic-loop": "tsx harness/basic-loop.ts",
     "report": "playwright show-report",
     "harness": "tsx harness/agentic-harness.ts",
+    "eval": "tsx harness/eval.ts",
     "reset": "tsx scripts/reset.ts",
     "typecheck": "tsc --noEmit",
     "test:cart": "playwright test --project=app tests/cart",
     "test:checkout": "playwright test --project=app tests/checkout"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@anthropic-ai/sdk": "^1.3.0",
     "dotenv": "^16.4.7",
     "zod": "^3.24.2"
   },

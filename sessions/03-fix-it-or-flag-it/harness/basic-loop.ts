@@ -71,6 +71,31 @@ function rerun(file: string): boolean {
   }
 }
 
+const countAssertions = (src: string) => (src.match(/expect\(/g) ?? []).length;
+// Descriptive only here — basic-loop has no guardrail to enforce this, unlike agentic-harness.ts.
+// Capturing whether it reached for a hard wait anyway is exactly the point of the eval comparison.
+const containsHardWait = (src: string) => /waitForTimeout\s*\(|setTimeout\s*\(|\bsleep\s*\(/.test(src);
+
+type LogRow = {
+  scenario: string;
+  result: string;
+  inputTokens: number;
+  outputTokens: number;
+  latencyMs: number;
+  assertionsBefore: number;
+  assertionsAfter: number;
+  containsHardWait: boolean;
+};
+
+function appendBasicLoopLog(model: string, results: LogRow[]) {
+  const logPath = path.join(root, 'logs', 'basic-loop-log.json');
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const existing: unknown[] = fs.existsSync(logPath) ? JSON.parse(fs.readFileSync(logPath, 'utf-8')) : [];
+  existing.push({ timestamp: new Date().toISOString(), model, results });
+  fs.writeFileSync(logPath, JSON.stringify(existing, null, 2) + '\n');
+  return existing.length;
+}
+
 console.log('resetting all scenarios');
 execSync('npx tsx scripts/reset.ts all', { cwd: root, stdio: 'inherit' });
 
@@ -82,6 +107,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const model = process.env.CLAUDE_MODEL ?? 'claude-sonnet-5-5';
 const scenarioOf = (file: string) => file.match(/scenarios\/(\d+)\//)?.[1] ?? file;
 const summary: { scenario: string; result: string }[] = [];
+const log: LogRow[] = [];
 
 for (const failure of failures) {
   const specPath = path.join(root, failure.file);
@@ -90,9 +116,13 @@ for (const failure of failures) {
   console.log(`\n=== ${failure.file} ===`);
   console.log(`asking ${model} to fix it (bare prompt, no spec, no changelog, no contract${failure.snapshot ? ', just a page snapshot' : ''})...`);
 
+  const startedAt = Date.now();
   const response = await anthropic.messages.create({
     model,
     max_tokens: 2000,
+    // Same reasoning depth as agentic-harness.ts, so a side-by-side eval isn't comparing a
+    // deliberately-dumbed-down naive loop against a harder-thinking contract.
+    output_config: { effort: 'medium' },
     messages: [
       {
         role: 'user',
@@ -105,6 +135,7 @@ for (const failure of failures) {
       },
     ],
   });
+  const latencyMs = Date.now() - startedAt;
 
   const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
   const match = text.match(/```(?:ts|typescript)?\n([\s\S]*?)```/);
@@ -125,6 +156,16 @@ for (const failure of failures) {
   const passed = rerun(failure.file);
   console.log(passed ? `${failure.file}: now passing` : `${failure.file}: still failing`);
   summary.push({ scenario: scenarioOf(failure.file), result: passed ? 'now passing' : 'still failing' });
+  log.push({
+    scenario: scenarioOf(failure.file),
+    result: passed ? 'now passing' : 'still failing',
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+    latencyMs,
+    assertionsBefore: countAssertions(originalSpec),
+    assertionsAfter: countAssertions(match[1]),
+    containsHardWait: containsHardWait(match[1]),
+  });
 
   if (scenarioOf(failure.file) === '01') {
     // Best-effort narration aid, not core logic — the app's own server is torn down between
@@ -139,6 +180,9 @@ for (const failure of failures) {
 
 console.log('\nsummary:');
 console.table(summary);
+
+const totalRuns = appendBasicLoopLog(model, log);
+console.log(`logged to logs/basic-loop-log.json (${totalRuns} run${totalRuns === 1 ? '' : 's'} recorded so far).`);
 
 console.log('\nrerunning all scenarios together so the report reflects the final state...');
 try {
