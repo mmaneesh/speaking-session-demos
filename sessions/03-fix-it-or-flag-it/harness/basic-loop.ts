@@ -127,7 +127,13 @@ for (const failure of failures) {
   summary.push({ scenario: scenarioOf(failure.file), result: passed ? 'now passing' : 'still failing' });
 
   if (scenarioOf(failure.file) === '01') {
-    console.log(`live check: the checkout button's actual data-testid right now is "${await liveCheckoutButtonTestId()}"`);
+    // Best-effort narration aid, not core logic — the app's own server is torn down between
+    // playwright test invocations, so this can't be allowed to take the whole run down with it.
+    try {
+      console.log(`live check: the checkout button's actual data-testid right now is "${await liveCheckoutButtonTestId()}"`);
+    } catch {
+      console.log('live check: skipped (app server not reachable right now).');
+    }
   }
 }
 

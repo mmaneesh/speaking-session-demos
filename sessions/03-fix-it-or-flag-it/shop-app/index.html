@@ -188,9 +188,9 @@
     ];
     const SEED = { keyboard: 1, mouse: 1 };
 
-    // ?scenario=1..4 flips exactly one behaviour. Anything else is ignored.
+    // ?scenario=1..5 flips exactly one behaviour. Anything else is ignored.
     const rawScenario = new URLSearchParams(location.search).get('scenario');
-    const scenario = ['1', '2', '3', '4'].includes(rawScenario) ? rawScenario : null;
+    const scenario = ['1', '2', '3', '4', '5'].includes(rawScenario) ? rawScenario : null;
 
     const $ = (id) => document.getElementById(id);
     const money = (cents) => `$${(cents / 100).toFixed(2)}`;
@@ -332,9 +332,22 @@
           <span data-testid="checkout-${l.id}-label">${l.name} (×${l.qty})</span>
           <span data-testid="checkout-${l.id}-price">${money(l.lineCents)}</span>
         </div>`).join('');
-      $('co-subtotal').textContent = money(s.subtotal);
-      $('co-shipping').textContent = money(s.shipping);
-      $('co-total').textContent = money(s.total);
+      // Scenario 5: real but legitimate behaviour. The pricing service the summary totals come
+      // from is slow, so the real values hydrate in shortly after the first paint, not instantly.
+      if (scenario === '5') {
+        $('co-subtotal').textContent = '…';
+        $('co-shipping').textContent = '…';
+        $('co-total').textContent = '…';
+        setTimeout(() => {
+          $('co-subtotal').textContent = money(s.subtotal);
+          $('co-shipping').textContent = money(s.shipping);
+          $('co-total').textContent = money(s.total);
+        }, 500);
+      } else {
+        $('co-subtotal').textContent = money(s.subtotal);
+        $('co-shipping').textContent = money(s.shipping);
+        $('co-total').textContent = money(s.total);
+      }
       shownTotal = s.total;
     }
 

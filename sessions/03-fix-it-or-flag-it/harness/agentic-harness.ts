@@ -1,9 +1,13 @@
-// Act 2: the FIX / ASK / FLAG contract. Every citation is verified verbatim against its named
-// source before the harness trusts it. Only a verified FIX ever touches a file, and it is
-// reverted if the fix doesn't actually make the test pass.
+// Act 2/3: the FIX / ASK / FLAG contract, wrapped by the 6-component harness from the talk.
+// Every citation is verified verbatim against its named source before the harness trusts it.
+// Only a verified FIX ever touches a file, and it is reverted if the fix doesn't actually pass.
 //   npm run harness             decide all 4 scenario failures from one run
 //   npm run harness -- 02       restrict to failures whose path contains "02" (e.g. after
 //                                `npm run reset -- 2`, to show the FIX flip once evidence exists)
+//
+// Sections below are ordered to match the 6 components from CONTEXT_HANDOFF.md section 3.
+// Memory has no standalone block: the attempt-history half lives inside triageOneFailure's
+// retry loop (section 5), and the cross-run half (a run log) doesn't exist yet.
 import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,6 +19,10 @@ import { z } from 'zod';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 const read = (p: string) => fs.readFileSync(p, 'utf-8');
+
+// ═══════════════════════════ 1. CONTEXT ═══════════════════════════
+// SPEC.md, CHANGELOG.md, the test file, and the Playwright failure — everything the model is
+// given to decide with. Nothing else (never the app's source).
 
 type Failure = { file: string; title: string; error: string; evidence: string };
 
@@ -41,34 +49,11 @@ function discoverFailures(): Failure[] {
   return failures;
 }
 
-/** For scenario 01 (locator drift): the button's text never changes, so the citation alone doesn't
- *  show the audience anything moved. This shows what data-testid it actually carries right now. */
-async function liveCheckoutButtonTestId(): Promise<string | null> {
-  const { chromium } = await import('@playwright/test');
-  const browser = await chromium.launch();
-  try {
-    const page = await browser.newPage();
-    await page.goto('http://localhost:3456/cart?scenario=1');
-    return await page.locator('#proceed-btn').getAttribute('data-testid');
-  } finally {
-    await browser.close();
-  }
-}
+const SPEC = read(path.join(root, 'SPEC.md'));
 
-function rerunPasses(file: string): boolean {
-  try {
-    execSync(`npx playwright test --project=scenarios ${file}`, { cwd: root, stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Playwright's own error shape tells us which rule applies: an element that can't be found
- *  at all is a locator problem, not a value dispute. */
-function failureKind(error: string): 'locator' | 'value' {
-  return /waiting for getByTestId|Timeout .* exceeded/.test(error) ? 'locator' : 'value';
-}
+// ═════════════════════ 3. TOOLS / ACTION CONTRACT ═════════════════════
+// Structured FIX | ASK | FLAG output, forced through a tool call, never free text. The schema is
+// the contract; `verify`/`hasValid` are how the harness enforces it, independent of the model's say-so.
 
 const CitationSchema = z.object({ source: z.enum(['SPEC.md', 'CHANGELOG.md', 'failure']), quote: z.string() });
 const DecisionSchema = z.object({
@@ -113,14 +98,21 @@ function hasValid(verified: ReturnType<typeof verify>, source: string) {
   return verified.some((c) => c.source === source && c.valid);
 }
 
-const SPEC = read(path.join(root, 'SPEC.md'));
-
-async function decide(anthropic: Anthropic, model: string, failure: Failure, originalSpec: string, changelog: string, evidence: string): Promise<Decision> {
+async function decide(
+  anthropic: Anthropic,
+  model: string,
+  failure: Failure,
+  originalSpec: string,
+  changelog: string,
+  evidence: string,
+  retry?: { attempt: number; previousError: string },
+): Promise<Decision> {
   const prompt = `You are triaging one failing test. Call the \`decide\` tool with your answer.
 
 Rules:
 - FIX for a missing element: only if SPEC.md still describes this action's required behaviour, AND the page snapshot below shows a matching element (by role/visible name). Cite both SPEC.md and "failure".
 - FIX for a changed value: only if CHANGELOG.md documents this exact change. Cite the changelog entry.
+- FIX for a flaky/race-prone test: if the test reads a value once (e.g. \`.textContent()\`) and compares it with a plain \`expect(...).toBe(...)\` instead of a locator-based, polling assertion, and the value is correct once rendering settles, the test itself is the defect — not SPEC or CHANGELOG. Switch it to a polling assertion (\`await expect(locator).toHaveText(...)\`). Cite only "failure" — no SPEC/CHANGELOG citation applies. NEVER fix this with a wait or sleep (\`waitForTimeout\`, \`setTimeout\`, etc.) — that is always rejected, even if it would pass.
 - ASK: if no changelog entry documents a value change, say so plainly. Do not guess, and do not propose a test edit.
 - FLAG: if the numbers contradict SPEC.md's own rules (e.g. Total must equal Subtotal + Shipping, and it doesn't), regardless of the changelog. Cite the SPEC rule and the failing line from "failure". Do not propose a test edit.
 Every citation's quote must be copied exactly from the named source — no paraphrasing, no summarizing.
@@ -135,7 +127,11 @@ ${changelog}
 ${originalSpec}
 
 === Failure (error + page snapshot) ===
-${evidence}`;
+${evidence}${
+    retry
+      ? `\n\n=== Your previous attempt (#${retry.attempt - 1}) did not work ===\nYou proposed a FIX. After applying it, the test still failed, now with:\n${retry.previousError}\nPropose a different FIX that addresses this, or switch to ASK/FLAG if you no longer believe a FIX is right.`
+      : ''
+  }`;
 
   const response = await anthropic.messages.create({
     model,
@@ -149,6 +145,201 @@ ${evidence}`;
   return DecisionSchema.parse(call.input);
 }
 
+// ═══════════════════════════ 4. PERMISSIONS ═══════════════════════════
+// Write access limited to one scenario's test.spec.ts — enforced at the point of writing, never
+// just assumed from how a path happened to be built.
+
+const SCENARIOS_DIR = path.join(root, 'scenarios') + path.sep;
+
+function assertWritePermitted(targetPath: string) {
+  const resolved = path.resolve(targetPath);
+  if (!resolved.startsWith(SCENARIOS_DIR)) {
+    throw new Error(`refusing to write outside scenarios/: ${resolved}`);
+  }
+}
+
+// ═══════════════════════════ 6. VERIFICATION ═══════════════════════════
+// Rerun the test, check assertion integrity, and (for scenario 01 only) a live check that the
+// real DOM moved the way the citation claims — not just that the test file changed.
+
+/** One Playwright invocation gives us both the pass/fail result AND, on failure, the fresh error
+ *  text — needed to tell the model what actually broke after its fix, for the next attempt. */
+function rerunAndCapture(file: string): { passed: boolean; error: string | null } {
+  let raw = '';
+  try {
+    raw = execSync(`npx playwright test --project=scenarios ${file} --reporter=json`, { cwd: root, encoding: 'utf-8' });
+  } catch (err: any) {
+    raw = err.stdout ?? '';
+  }
+  const result = JSON.parse(raw).suites?.[0]?.specs?.[0]?.tests?.[0]?.results?.[0];
+  if (!result || result.status === 'passed') return { passed: true, error: null };
+  return { passed: false, error: stripAnsi(result.error?.message ?? '') };
+}
+
+/** Playwright's own error shape tells us locator vs. value — but a race/hydration failure looks
+ *  exactly like a value mismatch in the error text. The tell is the TEST'S OWN code: a one-shot
+ *  `.textContent()` + plain `.toBe(...)` instead of a polling, locator-based assertion. */
+function failureKind(error: string, testSource: string): 'locator' | 'value' | 'race' {
+  if (/waiting for getByTestId|Timeout .* exceeded/.test(error)) return 'locator';
+  if (/\.textContent\(\)/.test(testSource) && /\.toBe\(/.test(testSource)) return 'race';
+  return 'value';
+}
+
+const countAssertions = (src: string) => (src.match(/expect\(/g) ?? []).length;
+
+/** Assertion integrity: a proposed FIX may never drop assertions below the original count — the
+ *  "pull the battery out of the smoke alarm" move — even if the thinned-down test would pass. */
+function assertionIntegrityOk(originalSpec: string, proposedTest: string): boolean {
+  return countAssertions(proposedTest) >= countAssertions(originalSpec);
+}
+
+/** Guardrail: a proposed FIX may never paper over timing with a fixed wait or sleep. The correct
+ *  response to a race/hydration failure is a deterministic, polling wait, never a hard delay —
+ *  enforced here by code, regardless of what the prompt asks for or whether the wait would pass. */
+function containsHardWait(proposedTest: string): boolean {
+  return /waitForTimeout\s*\(|setTimeout\s*\(|\bsleep\s*\(/.test(proposedTest);
+}
+
+const HARD_WAIT_VIOLATION =
+  'Guardrail violation: the proposed fix contains a fixed wait or sleep (e.g. waitForTimeout). This harness always rejects that, regardless of whether it would make the test pass. Use a deterministic, polling, web-first assertion instead — never a hard-coded delay.';
+
+/** For scenario 01 (locator drift): the button's text never changes, so the citation alone doesn't
+ *  show the audience anything moved. This shows what data-testid it actually carries right now. */
+async function liveCheckoutButtonTestId(): Promise<string | null> {
+  const { chromium } = await import('@playwright/test');
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto('http://localhost:3456/cart?scenario=1');
+    return await page.locator('#proceed-btn').getAttribute('data-testid');
+  } finally {
+    await browser.close();
+  }
+}
+
+// ═══════════════════════════ 5. LOOP CONTROLLER ═══════════════════════════
+// Bounds how long the harness will keep trying a FIX on one failure: a cap on attempts, and an
+// early stop the moment two attempts in a row produce the exact same error (no progress).
+// The attempt/evidence state carried between iterations below is this run's Memory component.
+
+const MAX_ATTEMPTS = 3;
+
+type SummaryRow = { scenario: string; decision: string; outcome: string; needsHuman: boolean };
+
+/** One failure, start to finish: decide → verify → write → rerun → retry-or-stop. Calls every
+ *  other component above exactly once per attempt. Returns the one row this failure contributes
+ *  to the run's summary table. */
+async function triageOneFailure(anthropic: Anthropic, model: string, failure: Failure, changelog: string, scenario: string): Promise<SummaryRow> {
+  const specPath = path.join(root, failure.file);
+  const originalSpec = read(specPath);
+
+  console.log(`\n=== ${failure.file} ===`);
+
+  let evidence = failure.evidence;
+  let retry: { attempt: number; previousError: string } | undefined;
+  let attempt = 1;
+
+  while (true) {
+    let result: Decision;
+    try {
+      result = await decide(anthropic, model, failure, originalSpec, changelog, evidence, retry);
+    } catch (err: any) {
+      console.log(`action: REJECTED — model did not return a usable decision (${err.message}). Needs a human.`);
+      return { scenario, decision: '—', outcome: 'REJECTED — needs human', needsHuman: true };
+    }
+    console.log(`decision: ${result.decision}${attempt > 1 ? ` (attempt ${attempt} of ${MAX_ATTEMPTS})` : ''}`);
+    console.log(`reason: ${result.reason}`);
+
+    const sources: Record<string, string> = { 'SPEC.md': SPEC, 'CHANGELOG.md': changelog, failure: evidence };
+    const verified = verify(result.citations, sources);
+    for (const c of verified) console.log(`  citation [${c.source}]: ${c.valid ? 'VERIFIED' : 'NOT FOUND VERBATIM — rejected'} — "${c.quote}"`);
+
+    const kind = failureKind(failure.error, originalSpec);
+    const requirementMet =
+      result.decision === 'FIX'
+        ? kind === 'locator'
+          ? hasValid(verified, 'SPEC.md') && hasValid(verified, 'failure')
+          : kind === 'race'
+            ? hasValid(verified, 'failure')
+            : hasValid(verified, 'CHANGELOG.md')
+        : result.decision === 'FLAG'
+          ? hasValid(verified, 'SPEC.md') && hasValid(verified, 'failure')
+          : true; // ASK needs no citation — it's declaring evidence is missing
+
+    if (result.decision === 'FIX') {
+      if (!requirementMet || !result.proposedTest) {
+        console.log('action: REJECTED — FIX requires verified evidence of the right kind plus a proposed test. Leaving the test untouched; needs a human.');
+        return { scenario, decision: result.decision, outcome: 'REJECTED — needs human', needsHuman: true };
+      }
+      if (!assertionIntegrityOk(originalSpec, result.proposedTest)) {
+        console.log(`action: REJECTED — proposed fix drops assertions (${countAssertions(originalSpec)} → ${countAssertions(result.proposedTest)}). Leaving the test untouched; needs a human.`);
+        return { scenario, decision: result.decision, outcome: 'REJECTED — assertion count dropped', needsHuman: true };
+      }
+      if (containsHardWait(result.proposedTest)) {
+        console.log('action: REJECTED by guardrail — proposed fix contains a fixed wait/sleep. Not applying it.');
+        if (retry && retry.previousError === HARD_WAIT_VIOLATION) {
+          console.log('action: same guardrail violation twice in a row — stopping early. Needs a human.');
+          return { scenario, decision: result.decision, outcome: 'stopped — repeated guardrail violation', needsHuman: true };
+        }
+        if (attempt >= MAX_ATTEMPTS) {
+          console.log(`action: guardrail violation persists at the attempt cap (${MAX_ATTEMPTS}). Needs a human.`);
+          return { scenario, decision: result.decision, outcome: `attempt cap (${MAX_ATTEMPTS}) reached — needs human`, needsHuman: true };
+        }
+        console.log(`action: retrying without the hard wait (attempt ${attempt + 1} of ${MAX_ATTEMPTS}).`);
+        retry = { attempt: attempt + 1, previousError: HARD_WAIT_VIOLATION };
+        evidence = HARD_WAIT_VIOLATION;
+        attempt++;
+        continue;
+      }
+      assertWritePermitted(specPath);
+      fs.writeFileSync(specPath, result.proposedTest);
+      const { passed, error: newError } = rerunAndCapture(failure.file);
+
+      if (passed) {
+        console.log(`action: wrote the fix — verified passing${attempt > 1 ? ` on attempt ${attempt}` : ''}.`);
+        if (scenario === '01') {
+          // Best-effort narration aid, not core logic — the app's own server is torn down between
+          // playwright test invocations, so this can't be allowed to take the whole run down with it.
+          try {
+            console.log(`live check: the checkout button's actual data-testid right now is "${await liveCheckoutButtonTestId()}"`);
+          } catch {
+            console.log('live check: skipped (app server not reachable right now).');
+          }
+        }
+        return { scenario, decision: result.decision, outcome: attempt > 1 ? `fixed on attempt ${attempt}` : 'fixed — now passing', needsHuman: false };
+      }
+
+      fs.writeFileSync(specPath, originalSpec); // revert immediately, whether or not we retry next
+
+      if (retry && newError === retry.previousError) {
+        console.log('action: same error after the fix as before it — no progress, stopping early rather than burning more attempts. Reverted. Needs a human.');
+        return { scenario, decision: result.decision, outcome: 'stopped — repeated error', needsHuman: true };
+      }
+      if (attempt >= MAX_ATTEMPTS) {
+        console.log(`action: the proposed fix did NOT make the test pass, and the attempt cap (${MAX_ATTEMPTS}) is reached. Reverted. Needs a human.`);
+        return { scenario, decision: result.decision, outcome: `attempt cap (${MAX_ATTEMPTS}) reached — needs human`, needsHuman: true };
+      }
+
+      console.log(`action: the proposed fix did NOT make the test pass — reverted, retrying (attempt ${attempt + 1} of ${MAX_ATTEMPTS}).`);
+      retry = { attempt: attempt + 1, previousError: newError ?? failure.error };
+      evidence = newError ?? evidence;
+      attempt++;
+      // loop again with the new error fed back to the model
+    } else if (result.decision === 'FLAG') {
+      const outcome = requirementMet ? 'flagged for a human' : 'flagged (unverified — extra suspicion)';
+      console.log(requirementMet ? 'action: flagged for a human (no file touched).' : 'action: flagged, but evidence did not verify — treat with extra suspicion. No file touched.');
+      return { scenario, decision: result.decision, outcome, needsHuman: true };
+    } else {
+      console.log('action: asked a human (no file touched).');
+      return { scenario, decision: result.decision, outcome: 'asked a human', needsHuman: true };
+    }
+  }
+}
+
+// ═══════════════════════════ ORCHESTRATION / ENTRY POINT ═══════════════════════════
+// Not one of the 6 components itself — just the driver that discovers failures, runs each
+// through triageOneFailure, and reports the results.
+
 async function main() {
   const filter = process.argv[2];
 
@@ -161,69 +352,19 @@ async function main() {
   const model = process.env.CLAUDE_MODEL ?? 'claude-sonnet-5-5';
   const changelog = read(path.join(root, 'CHANGELOG.md'));
   const scenarioOf = (file: string) => file.match(/scenarios\/(\d+)\//)?.[1] ?? file;
-  const summary: { scenario: string; decision: string; outcome: string }[] = [];
 
+  const summary: SummaryRow[] = [];
   for (const failure of failures) {
-    const specPath = path.join(root, failure.file);
-    const originalSpec = read(specPath);
-    const evidence = failure.evidence;
-
-    console.log(`\n=== ${failure.file} ===`);
-    let result: Decision;
-    try {
-      result = await decide(anthropic, model, failure, originalSpec, changelog, evidence);
-    } catch (err: any) {
-      console.log(`action: REJECTED — model did not return a usable decision (${err.message}). Needs a human.`);
-      summary.push({ scenario: scenarioOf(failure.file), decision: '—', outcome: 'REJECTED — needs human' });
-      continue;
-    }
-    console.log(`decision: ${result.decision}`);
-    console.log(`reason: ${result.reason}`);
-
-    const sources: Record<string, string> = { 'SPEC.md': SPEC, 'CHANGELOG.md': changelog, failure: evidence };
-    const verified = verify(result.citations, sources);
-    for (const c of verified) console.log(`  citation [${c.source}]: ${c.valid ? 'VERIFIED' : 'NOT FOUND VERBATIM — rejected'} — "${c.quote}"`);
-
-    const kind = failureKind(failure.error);
-    const requirementMet =
-      result.decision === 'FIX'
-        ? kind === 'locator'
-          ? hasValid(verified, 'SPEC.md') && hasValid(verified, 'failure')
-          : hasValid(verified, 'CHANGELOG.md')
-        : result.decision === 'FLAG'
-          ? hasValid(verified, 'SPEC.md') && hasValid(verified, 'failure')
-          : true; // ASK needs no citation — it's declaring evidence is missing
-
-    if (result.decision === 'FIX') {
-      if (!requirementMet || !result.proposedTest) {
-        console.log('action: REJECTED — FIX requires verified evidence of the right kind plus a proposed test. Leaving the test untouched; needs a human.');
-        summary.push({ scenario: scenarioOf(failure.file), decision: result.decision, outcome: 'REJECTED — needs human' });
-        continue;
-      }
-      fs.writeFileSync(specPath, result.proposedTest);
-      if (rerunPasses(failure.file)) {
-        console.log('action: wrote the fix — verified passing.');
-        summary.push({ scenario: scenarioOf(failure.file), decision: result.decision, outcome: 'fixed — now passing' });
-        if (scenarioOf(failure.file) === '01') {
-          console.log(`live check: the checkout button's actual data-testid right now is "${await liveCheckoutButtonTestId()}"`);
-        }
-      } else {
-        fs.writeFileSync(specPath, originalSpec);
-        console.log('action: the proposed fix did NOT make the test pass — reverted. Needs a human.');
-        summary.push({ scenario: scenarioOf(failure.file), decision: result.decision, outcome: 'reverted — needs human' });
-      }
-    } else if (result.decision === 'FLAG') {
-      const outcome = requirementMet ? 'flagged for a human' : 'flagged (unverified — extra suspicion)';
-      console.log(requirementMet ? 'action: flagged for a human (no file touched).' : 'action: flagged, but evidence did not verify — treat with extra suspicion. No file touched.');
-      summary.push({ scenario: scenarioOf(failure.file), decision: result.decision, outcome });
-    } else {
-      console.log('action: asked a human (no file touched).');
-      summary.push({ scenario: scenarioOf(failure.file), decision: result.decision, outcome: 'asked a human' });
-    }
+    summary.push(await triageOneFailure(anthropic, model, failure, changelog, scenarioOf(failure.file)));
   }
 
   console.log('\nsummary:');
   console.table(summary);
+
+  // needsHuman is the explicit human-gate signal: anything but a verified, passing FIX stops here
+  // and waits for a person — never auto-resolved, never silently dropped. Feeds the future run log.
+  const pending = summary.filter((s) => s.needsHuman);
+  console.log(`\nhuman gate: ${pending.length} of ${summary.length} need a person — ${pending.map((s) => s.scenario).join(', ') || 'none'}.`);
 
   console.log('\nrerunning the triaged scenario(s) together so the report reflects the final state...');
   try {
