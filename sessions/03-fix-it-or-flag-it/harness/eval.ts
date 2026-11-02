@@ -37,11 +37,15 @@ function writeTrialArtifact(model: string, harness: 'agentic-harness' | 'basic-l
   fs.writeFileSync(path.join(EVAL_RUNS_DIR, `${model}__${harness}__trial${trial}.json`), JSON.stringify(entry, null, 2) + '\n');
 }
 
+/** A scenario test failing is expected and handled inside the harness scripts — it never makes
+ *  them exit non-zero. So a non-zero exit here always means the script itself crashed (API error,
+ *  rate limit, etc.), and that must stay visible rather than silently look like a clean trial. */
 function run(cmd: string, env: Record<string, string>) {
   try {
     execSync(cmd, { cwd: root, env: { ...process.env, ...env }, stdio: 'pipe' });
-  } catch {
-    // scenarios are expected to fail — only the log file written by the harness matters here.
+  } catch (err: any) {
+    const stderr = err?.stderr?.toString().trim().slice(-500) ?? '';
+    console.warn(`\n  ⚠ "${cmd}" crashed — this trial will be missing from the results.${stderr ? `\n    ${stderr}` : ''}`);
   }
 }
 
