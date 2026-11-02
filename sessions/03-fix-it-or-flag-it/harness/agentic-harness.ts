@@ -119,9 +119,17 @@ const decideTool = {
   },
 };
 
-/** Never trust the model's claim that evidence exists — check the named source ourselves. */
+/** Never trust the model's claim that evidence exists — check the named source ourselves.
+ *  A quote below MIN_QUOTE_LENGTH is rejected outright: `"".includes("")` is true in JS, so an
+ *  empty or trivial quote would otherwise verify against any source. */
+const MIN_QUOTE_LENGTH = 8;
+
 function verify(citations: Decision['citations'], sources: Record<string, string>) {
-  return citations.map((c) => ({ ...c, valid: sources[c.source]?.includes(c.quote) ?? false }));
+  return citations.map((c) => {
+    const quote = c.quote.trim();
+    const valid = quote.length >= MIN_QUOTE_LENGTH && (sources[c.source]?.includes(quote) ?? false);
+    return { ...c, valid };
+  });
 }
 
 function hasValid(verified: ReturnType<typeof verify>, source: string) {
