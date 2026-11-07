@@ -5,7 +5,7 @@
 //   npm run harness -- 02       restrict to failures whose path contains "02" (e.g. after
 //                                `npm run reset -- 2`, to show the FIX flip once evidence exists)
 //
-// Sections below are ordered to match the 6 components from CONTEXT_HANDOFF.md section 3.
+// Sections below are ordered to match the 6 components from BUILD_DECISIONS.md section 3.
 // Memory has two halves: attempt-history within a run lives inside triageOneFailure's retry
 // loop (section 5); the cross-run half is logs/run-log.json, appended to below (section 2).
 import 'dotenv/config';
