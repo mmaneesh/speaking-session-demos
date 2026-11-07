@@ -1,4 +1,4 @@
-# Context Handoff & Master Blueprint
+# Build Decisions & Master Blueprint
 
 > Last updated 2026-11-02. This file reflects current decisions only — stale detail from earlier drafts has been removed rather than superseded in place. Read it fully before touching code.
 > Repo note: this project now lives at `sessions/03-fix-it-or-flag-it/` inside the `speaking-session-demos` umbrella repo (public on GitHub as `mmaneesh/speaking-session-demos`), one sibling folder per session in the speaking series. It used to be its own standalone repo.
@@ -11,7 +11,7 @@
 ## 2. Speaking Roadmap
 - Completed #1: *Practical Usage of Skills & Plugins in QA's Everyday Workflow*
 - Completed #2: *Guardrails & Evals*
-- **Session #3 (current): "Fix It or Flag It" — Loop Engineering & The Agent Harness**
+- **Session #3 (current): "Fix It or Flag It" — "Give an AI a loop, it'll cheat. Give it a harness, it'll confess."**
 - Session #4: RAG & Agentic RAG
 - Session #5: Context Engineering & Memory Management
 - Session #6: Agent-to-Agent Orchestration
@@ -124,12 +124,11 @@ Reset before each run of `basic-loop`/`harness` — the root `CHANGELOG.md` gets
 
 **Decided 2026-11-01: finish the harness completely before building the presentation story.** The story gets built around the finished thing, not in parallel with it.
 
-**Done:** scenario 4's narrative reframe (promo-code story) · `git init` (now the `speaking-session-demos` umbrella repo) · Act 3's deterministic checks (permissions guard, human gate, assertion-integrity check, attempt cap + same-error-twice retry loop) · the hard-wait guardrail · scenario 5 (hydration race, built, wired into `reset.ts`/contract tests, live-verified across Sonnet and Haiku) · the `agentic-harness.ts` reorganization into 6-component sections · the run log (`logs/run-log.json`) · extended thinking (surfaced, not just the `reason` field's post-hoc summary) · `output_config: { effort: 'medium' }` on both harnesses · the multi-dimensional eval (`harness/eval.ts` + `harness/eval.config.json`) · **the full 5-trial eval sweep (2026-11-02, real numbers, see section 8)** · **citation verification hardened (2026-11-02, see section 8)**.
+**Done:** scenario 4's narrative reframe (promo-code story) · `git init` (now the `speaking-session-demos` umbrella repo) · Act 3's deterministic checks (permissions guard, human gate, assertion-integrity check, attempt cap + same-error-twice retry loop) · the hard-wait guardrail · scenario 5 (hydration race, built, wired into `reset.ts`/contract tests, live-verified across Sonnet and Haiku) · the `agentic-harness.ts` reorganization into 6-component sections · the run log (`logs/run-log.json`) · extended thinking (surfaced, not just the `reason` field's post-hoc summary) · `output_config: { effort: 'medium' }` on both harnesses · the multi-dimensional eval (`harness/eval.ts` + `harness/eval.config.json`) · **the full 5-trial eval sweep (2026-11-02, real numbers, see section 8)** · **citation verification hardened (2026-11-02, see section 8)** · **the presentation story (2026-11-02, `SPEAKER_NOTES.md`)**.
 
 **Dry run of the entire flow — done (2026-11-01).** test:all → report → reset → basic-loop (Haiku) → reset → harness (thinking + decisions all correct) → run log → evidence-flip. Every step matched the README exactly, with one real bug found and fixed along the way (above). The naive loop's live result that day was also a good demo beat: 01/02/03/05 "fixed," 04 correctly resisted.
 
-Still open:
-1. **The presentation story** — the only item left. A beat-by-beat telling (timing, what's on screen, where the turns/reveals land) built from sections 2-5 of this doc plus everything found/built along the way, including the dry run's narration beats and the eval's headline numbers (agentic-harness: 100% groundedness + 96-100% consistency across all 3 models, vs. basic-loop's unmeasurable groundedness and 88% consistency floor at Opus). This is what slides and animations follow.
+**Done, 2026-11-02: the presentation story.** Full slide-by-slide speaker notes written to `SPEAKER_NOTES.md` in this folder — 25 min talk + 15 min demo + ~20 min Q&A inside the 60-min slot. Ready to hand to a slide-generation tool. Nothing left open.
 
 **Known accepted risk, not an action item:** scenario 4 stays a genuine live coin flip (~1/12 cheat rate on Haiku) — fine either way, both outcomes are narratable, not something to force. Scenario 5 has been reliable across every rehearsal run on both models so far (no observed hard-wait attempt), so the guardrail's retry/reject path is verified by direct code-level check of its trigger conditions rather than by watching it misfire live.
 

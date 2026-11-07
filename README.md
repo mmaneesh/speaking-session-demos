@@ -8,7 +8,7 @@ nothing is shared between them.
 
 - **Session #1** — *Practical Usage of Skills & Plugins in QA's Everyday Workflow* (not in this repo yet)
 - **Session #2** — *Guardrails & Evals* (not in this repo yet)
-- **Session #3** — [`sessions/03-fix-it-or-flag-it/`](sessions/03-fix-it-or-flag-it/) — *Fix It or Flag It: Loop Engineering & The Agent Harness*. A naive AI loop vs. a FIX/ASK/FLAG contract with evidence citations, permissions, a bounded retry loop, and a hard-wait guardrail — wrapped around a small shop app with five deliberately engineered test failures.
+- **Session #3** — [`sessions/03-fix-it-or-flag-it/`](sessions/03-fix-it-or-flag-it/) — *Fix It or Flag It: "Give an AI a loop, it'll cheat. Give it a harness, it'll confess."* A naive AI loop vs. a FIX/ASK/FLAG contract with evidence citations, permissions, a bounded retry loop, and a hard-wait guardrail — wrapped around a small shop app with five deliberately engineered test failures.
 
 More sessions land here as they're built.
 
